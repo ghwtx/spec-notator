@@ -36,7 +36,6 @@
     Crosshair,
     Plus,
     Check,
-    CheckCheck,
     Trash2,
     X,
     MessageSquare,
@@ -163,42 +162,70 @@
   const annotationsEnriched = $derived<EnrichedAnnotation[]>(
     annotations.map((a) => {
       const b = blocksMap[a.blockId];
+      const line = a.line ?? b?.line ?? 0;
+
+      // Multi-block pinpoint: range across the spanned blocks.
+      if (a.blockIds && a.blockIds.length > 1) {
+        const lines = a.blockIds
+          .map((id) => blocksMap[id]?.line ?? line)
+          .filter((n) => n > 0);
+        const lineEnd = lines.length ? Math.max(...lines) : line;
+        const startLine = lines.length ? Math.min(...lines) : line;
+        return {
+          ...a,
+          blockOrder: b?.order ?? 0,
+          blockCrumb: b?.crumb || "",
+          line: startLine,
+          lineEnd,
+          locLabel: startLine === lineEnd ? `L${startLine}` : `L${startLine}–L${lineEnd}`,
+        };
+      }
+
+      // Text-range within a single block: include columns when partial.
+      // start/end are character offsets into the rendered block text.
+      // Treat selections that cover the whole block as "no column" — just the line.
+      const blockText =
+        b && "text" in (b as any) ? (b as any).text as string :
+        b && (b as any).kind === "list" ? ((b as any).items || []).map((i: any) => i.text).join(" ") :
+        "";
+      const wholeBlock = a.start === 0 && a.end >= blockText.length;
+      const locLabel = wholeBlock
+        ? `L${line}`
+        : `L${line}:${a.start + 1}–${a.end + 1}`;
+
       return {
         ...a,
         blockOrder: b?.order ?? 0,
         blockCrumb: b?.crumb || "",
-        line: a.line ?? b?.line ?? 0,
+        line,
+        lineEnd: line,
+        locLabel,
       };
     }),
   );
   const sectionCounts = $derived.by<Record<string, number>>(() => {
     const c: Record<string, number> = {};
-    annotationsEnriched
-      .filter((a) => !a.resolved)
-      .forEach((a) => {
-        const slug = blocksMap[a.blockId]?.sectionSlug;
-        if (!slug) return;
-        c[slug] = (c[slug] || 0) + 1;
-      });
+    annotationsEnriched.forEach((a) => {
+      const slug = blocksMap[a.blockId]?.sectionSlug;
+      if (!slug) return;
+      c[slug] = (c[slug] || 0) + 1;
+    });
     return c;
   });
   const headingItems = $derived(blocks.filter((b) => b.kind === "heading" && (b as any).level <= 3));
-  const openAnnCount = $derived(annotationsEnriched.filter((a) => !a.resolved).length);
+  const openAnnCount = $derived(annotationsEnriched.length);
   const typeCounts = $derived.by(() => {
     const c: Record<string, number> = { all: annotationsEnriched.length };
     TYPES.forEach((t) => { c[t.id] = 0; });
-    annotationsEnriched.forEach((a) => { if (!a.resolved) c[a.type]++; });
-    c.resolved = annotationsEnriched.filter((a) => a.resolved).length;
-    c.open = annotationsEnriched.filter((a) => !a.resolved).length;
+    annotationsEnriched.forEach((a) => { c[a.type]++; });
     return c;
   });
   const filteredAnnotations = $derived.by(() => {
     const all = [...annotationsEnriched].sort(
       (a, b) => a.blockOrder - b.blockOrder || a.start - b.start,
     );
-    if (filter === "all") return all.filter((a) => !a.resolved);
-    if (filter === "resolved") return all.filter((a) => a.resolved);
-    return all.filter((a) => a.type === filter && !a.resolved);
+    if (filter === "all") return all;
+    return all.filter((a) => a.type === filter);
   });
   const searchHits = $derived.by(() => {
     if (!search.trim() || search.length < 2) return [] as { blockId: string; offset: number }[];
@@ -240,7 +267,6 @@
       type,
       note: "",
       replacement: "",
-      resolved: false,
       createdAt: Date.now(),
       line: b?.line ?? 0,
       justCreated: true,
@@ -266,7 +292,6 @@
       type: "comment",
       note: "",
       replacement: "",
-      resolved: false,
       createdAt: Date.now(),
       line: b.line,
       justCreated: true,
@@ -308,7 +333,6 @@
       type,
       note: "",
       replacement: "",
-      resolved: false,
       createdAt: Date.now(),
       line: b?.line ?? 0,
       justCreated: true,
@@ -369,10 +393,6 @@
 
   function updateAnn(id: string, patch: Partial<Annotation>) {
     annotations = annotations.map((a) => (a.id === id ? { ...a, ...patch } : a));
-  }
-  function resolveAnn(id: string) {
-    const a = annotations.find((x) => x.id === id);
-    if (a) updateAnn(id, { resolved: !a.resolved });
   }
   function deleteAnn(id: string) {
     annotations = annotations.filter((a) => a.id !== id);
@@ -518,8 +538,7 @@
           wrapTextRange(el, a.start, a.end, {
             class:
               "annot-mark" +
-              (a.id === activeId ? " active" : "") +
-              (a.resolved ? " resolved" : ""),
+              (a.id === activeId ? " active" : ""),
             "data-type": a.type,
             "data-id": a.id,
           });
@@ -805,7 +824,6 @@
         e.preventDefault();
         cycleAnnotationFocus(-1); return;
       }
-      if (e.key === " " && focusedAnnotationId) { e.preventDefault(); resolveAnn(focusedAnnotationId); return; }
       if ((e.key === "x" || e.key === "Delete") && focusedAnnotationId) { e.preventDefault(); deleteAnn(focusedAnnotationId); return; }
       if (e.key === "t" && focusedAnnotationId) { e.preventDefault(); cycleAnnType(focusedAnnotationId, 1); return; }
       if (e.key === "T" && focusedAnnotationId) { e.preventDefault(); cycleAnnType(focusedAnnotationId, -1); return; }
@@ -905,7 +923,7 @@
       items.push({
         kind: "annotation",
         label: `${TYPE_BY_ID[a.type].label}: ${a.quoted.slice(0, 60)}`,
-        sub: `${a.blockCrumb} · L${a.line}`,
+        sub: `${a.blockCrumb} · ${a.locLabel}`,
         onPick: () => { jumpToAnn(a); paletteOpen = false; },
       });
     });
@@ -1043,7 +1061,7 @@
     <!-- TOC -->
     <div
       class="toc"
-      style={focusContext === "toc" ? "box-shadow: inset 1px 0 0 var(--accent)" : ""}
+      style={focusContext === "toc" ? "box-shadow: inset 2px 0 0 var(--line-strong)" : ""}
       onclick={() => { focusContext = "toc"; }}
       role="navigation"
       aria-label="Contents"
@@ -1073,7 +1091,7 @@
       onmouseup={onMouseUp}
       onscroll={onDocScroll}
       onclick={(e) => { focusContext = "doc"; onDocClick(e); }}
-      style={focusContext === "doc" ? "box-shadow: inset 1px 0 0 var(--accent), inset -1px 0 0 var(--accent)" : ""}
+      style=""
     >
       <div class="doc">
         <div class="doc-meta">
@@ -1089,7 +1107,6 @@
               (focusedBlockId === b.id ? " focused" : "") +
               (pinpointMode && pinpointSelected.includes(b.id) ? " pp-selected" : "") +
               (ppAnn ? " pp-annot" : "") +
-              (ppAnn?.resolved ? " pp-resolved" : "") +
               (ppAnn && ppAnn.id === activeId ? " pp-active" : "")
             }
             data-pp-type={ppAnn?.type || null}
@@ -1121,7 +1138,7 @@
           {@const top = ((document.getElementById(`blk-${a.blockId}`)?.offsetTop || 0) / Math.max(scrollEl?.scrollHeight || 1, 1)) * 100}
           <div
             class="minimap-marker"
-            style={`top:${top}%;background:var(--c-${a.type});opacity:${a.resolved ? 0.25 : 0.75}`}
+            style={`top:${top}%;background:var(--c-${a.type});opacity:0.75`}
             title={a.note || a.quoted}
             onclick={() => jumpToAnn(a)}
           ></div>
@@ -1132,7 +1149,7 @@
     <!-- Annotations rail -->
     <div
       class="annotations"
-      style={focusContext === "annotations" ? "box-shadow: inset 1px 0 0 var(--accent)" : ""}
+      style={focusContext === "annotations" ? "box-shadow: inset 2px 0 0 var(--line-strong)" : ""}
       onclick={() => { focusContext = "annotations"; }}
       role="region"
       aria-label="Annotations"
@@ -1161,11 +1178,6 @@
               </button>
             {/if}
           {/each}
-          {#if typeCounts.resolved > 0}
-            <button class={"ann-filter-btn" + (filter === "resolved" ? " active" : "")} onclick={() => { filter = "resolved"; }}>
-              <CheckCheck size={11} strokeWidth={1.8} /> Resolved <span style="opacity:0.6">{typeCounts.resolved}</span>
-            </button>
-          {/if}
         </div>
         <div class="ann-list">
           {#if filteredAnnotations.length === 0}
@@ -1180,7 +1192,7 @@
           {#each filteredAnnotations as a (a.id)}
             {@const blk = blocksMap[a.blockId]}
             <div
-              class={"a-card" + (a.id === activeId ? " active" : "") + (a.resolved ? " resolved" : "") + (a.id === focusedAnnotationId ? " focused" : "")}
+              class={"a-card" + (a.id === activeId ? " active" : "") + (a.id === focusedAnnotationId ? " focused" : "")}
               onclick={() => { activeId = a.id; jumpToAnn(a); }}
               role="button"
               tabindex="0"
@@ -1188,11 +1200,8 @@
               <div class="a-head">
                 <span class="a-type" data-t={a.type}></span>
                 <span class="a-type-label">{TYPE_BY_ID[a.type].label}</span>
-                <span class="a-crumb">{blk?.crumb || "—"} · L{a.line || "?"}</span>
+                <span class="a-crumb">{blk?.crumb || "—"} · {a.locLabel}</span>
                 <div class="a-actions" onclick={(e) => e.stopPropagation()}>
-                  <button class="a-act" title="Resolve (Space)" aria-label="Resolve" onclick={() => resolveAnn(a.id)}>
-                    <Check size={13} strokeWidth={2} />
-                  </button>
                   <button class="a-act" title="Delete (X)" aria-label="Delete" onclick={() => deleteAnn(a.id)}>
                     <Trash2 size={13} strokeWidth={1.8} />
                   </button>
@@ -1308,7 +1317,7 @@
           <h2>Generate review output</h2>
           <div class="spacer"></div>
           <span style="font-size:11px;color:var(--text-dim);font-family:'Geist Mono',monospace">
-            {openAnnCount} open · {typeCounts.resolved} resolved
+            {openAnnCount} annotation{openAnnCount === 1 ? "" : "s"}
           </span>
           <button class="btn ghost icon" onclick={() => { outputOpen = false; }} aria-label="Close"><X size={14} strokeWidth={1.8} /></button>
         </div>
