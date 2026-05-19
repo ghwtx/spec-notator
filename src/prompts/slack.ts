@@ -2,12 +2,12 @@ import type { EnrichedAnnotation, DocPayload, SlackTone, SlackGrouping } from ".
 import { TYPES, TYPE_BY_ID } from "../types";
 
 const EMOJI: Record<string, string> = {
-  comment: ":speech_balloon:",
-  replace: ":pencil2:",
-  delete: ":wastebasket:",
-  add: ":heavy_plus_sign:",
-  question: ":question:",
-  approve: ":white_check_mark:",
+  comment: "💬",
+  replace: "✏️",
+  delete: "🗑️",
+  add: "➕",
+  question: "❓",
+  approve: "✅",
 };
 
 export interface SlackOpts {
@@ -24,8 +24,8 @@ export function buildSlack(
   const includeQuotes = opts.includeQuotes !== false;
   const groupByType = opts.groupBy === "type";
   const tone = opts.tone || "casual";
-  const list = annotations.filter((a) => !a.resolved);
-  if (list.length === 0) return "_(no open annotations)_";
+  const list = annotations;
+  if (list.length === 0) return "_(no annotations)_";
 
   const greet =
     tone === "casual"
@@ -34,7 +34,7 @@ export function buildSlack(
 
   const renderItem = (a: EnrichedAnnotation): string => {
     const t = TYPE_BY_ID[a.type];
-    const head = `${EMOJI[a.type]} *${t.label}*${a.blockCrumb ? ` _in ${a.blockCrumb}_` : ""} · _L${a.line || "?"}_`;
+    const head = `${EMOJI[a.type]} *${t.label}*${a.blockCrumb ? ` _in ${a.blockCrumb}_` : ""} · _${a.locLabel}_`;
     const quote =
       includeQuotes && a.quoted
         ? `> ${a.quoted.length > 140 ? a.quoted.slice(0, 137) + "…" : a.quoted}`

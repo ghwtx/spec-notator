@@ -6,11 +6,11 @@ export function buildMarkdown(
   annotations: EnrichedAnnotation[],
   opts: { variant?: AgentVariant } = {},
 ): string {
-  const list = annotations.filter((a) => !a.resolved);
+  const list = annotations;
   const variant = opts.variant || "structured";
 
   if (list.length === 0) {
-    return `# Review of ${doc.name}\n\n_(no open annotations)_`;
+    return `# Review of ${doc.name}\n\n_(no annotations)_`;
   }
 
   if (variant === "patch") {
@@ -25,7 +25,7 @@ export function buildMarkdown(
     list.forEach((a, i) => {
       const t = TYPE_BY_ID[a.type];
       const scope = a.blockIds && a.blockIds.length > 1 ? ` (spans ${a.blockIds.length} blocks)` : "";
-      parts.push(`### Change ${i + 1} — ${t.label} at line ${a.line || "?"}${scope}`);
+      parts.push(`### Change ${i + 1} — ${t.label} at ${a.locLabel}${scope}`);
       if (a.blockCrumb) parts.push(`**Section:** ${a.blockCrumb}`);
       if (a.quoted) parts.push(`**Quoted:**\n> ${a.quoted.replace(/\n/g, "\n> ")}`);
       const action =
@@ -53,7 +53,7 @@ export function buildMarkdown(
       ``,
     ];
     list.forEach((a, i) => {
-      const where = a.blockCrumb ? ` in the "${a.blockCrumb}" section (line ${a.line || "?"})` : ` at line ${a.line || "?"}`;
+      const where = a.blockCrumb ? ` in the "${a.blockCrumb}" section (${a.locLabel})` : ` at ${a.locLabel}`;
       let step: string;
       if (a.type === "replace") {
         step = `Replace ${a.quoted ? `"${a.quoted}"` : "the highlighted text"}${where}${a.replacement ? ` with: \`${a.replacement}\`` : ""}.`;
@@ -80,7 +80,7 @@ export function buildMarkdown(
   const parts: string[] = [
     `# Review of ${doc.name}`,
     ``,
-    `Total open annotations: **${list.length}**`,
+    `Total annotations: **${list.length}**`,
     ``,
   ];
   const groups: Record<string, EnrichedAnnotation[]> = {};
@@ -93,7 +93,7 @@ export function buildMarkdown(
     parts.push(`## ${t.label}${g.length > 1 ? "s" : ""} (${g.length})`);
     parts.push(``);
     g.forEach((a) => {
-      const loc = `${a.blockCrumb || "—"} · L${a.line || "?"}`;
+      const loc = `${a.blockCrumb || "—"} · ${a.locLabel}`;
       parts.push(`- **${loc}**`);
       if (a.quoted) parts.push(`  > ${a.quoted.replace(/\n/g, "\n  > ")}`);
       if (a.note) parts.push(`  - Note: ${a.note}`);
@@ -107,7 +107,7 @@ export function buildMarkdown(
   parts.push(`## Instructions`);
   parts.push(``);
   parts.push(
-    `Apply each open annotation to the source document. For "Replace" and "Add" annotations use the proposed text verbatim. For "Delete" annotations remove the quoted span (and its enclosing sentence if removal would leave a fragment). For "Question" annotations, research the question against the document's surrounding context (and any other authoritative sources you have access to), then add a substantive answer inline in the document — not just a flag or placeholder. If you cannot answer confidently, say so explicitly and explain what additional information would be needed. For "Approve" annotations make no change. Preserve markdown formatting throughout.`,
+    `Apply each annotation to the source document. For "Replace" and "Add" annotations use the proposed text verbatim. For "Delete" annotations remove the quoted span (and its enclosing sentence if removal would leave a fragment). For "Question" annotations, research the question against the document's surrounding context (and any other authoritative sources you have access to), then add a substantive answer inline in the document — not just a flag or placeholder. If you cannot answer confidently, say so explicitly and explain what additional information would be needed. For "Approve" annotations make no change. Preserve markdown formatting throughout.`,
   );
   return parts.join("\n");
 }

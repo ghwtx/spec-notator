@@ -16,7 +16,6 @@ export interface Annotation {
   type: AnnotationType;
   note: string;
   replacement: string;
-  resolved: boolean;
   createdAt: number;
   line: number;
   justCreated?: boolean;
@@ -25,6 +24,10 @@ export interface Annotation {
 export interface EnrichedAnnotation extends Annotation {
   blockOrder: number;
   blockCrumb: string;
+  // Display-ready location label: "L9", "L9:23–67", or "L9–L64".
+  locLabel: string;
+  // Source-line endpoints (line === start for single-line annotations).
+  lineEnd: number;
 }
 
 export interface MdBlockHeading { id: string; kind: "heading"; level: number; text: string; slug: string; line: number; }

@@ -3,12 +3,26 @@ import type { EnrichedAnnotation, AgentVariant, DocPayload } from "../types";
 const esc = (s: string | undefined): string =>
   (s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
+// Build location attributes: line/line_end for ranges, col_start/col_end for
+// partial single-block selections. Falls back to line="?" when missing.
+function locAttrs(a: { line: number; lineEnd?: number; blockIds?: string[]; start: number; end: number }): string {
+  const line = a.line || 0;
+  const lineEnd = a.lineEnd ?? line;
+  const isPinpoint = !!(a.blockIds && a.blockIds.length > 1);
+  const parts: string[] = [`line="${line || "?"}"`];
+  if (lineEnd > line) parts.push(`line_end="${lineEnd}"`);
+  if (!isPinpoint && line === lineEnd && (a.start > 0 || a.end > 0)) {
+    parts.push(`col_start="${a.start + 1}"`, `col_end="${a.end + 1}"`);
+  }
+  return parts.join(" ");
+}
+
 export function buildXML(
   doc: DocPayload,
   annotations: EnrichedAnnotation[],
   opts: { variant?: AgentVariant } = {},
 ): string {
-  const list = annotations.filter((a) => !a.resolved);
+  const list = annotations;
   const variant = opts.variant || "structured";
 
   if (variant === "patch") {
@@ -21,7 +35,7 @@ export function buildXML(
     list.forEach((a, i) => {
       const scope = a.blockIds && a.blockIds.length > 1 ? ` scope="${a.blockIds.length}-blocks"` : "";
       const lines = [
-        `  <change id="${i + 1}" type="${a.type}" line="${a.line || "?"}" section="${esc(a.blockCrumb || "")}"${scope}>`,
+        `  <change id="${i + 1}" type="${a.type}" ${locAttrs(a)} section="${esc(a.blockCrumb || "")}"${scope}>`,
       ];
       if (a.quoted) lines.push(`    <target>${esc(a.quoted)}</target>`);
       if (a.replacement) lines.push(`    <replacement>${esc(a.replacement)}</replacement>`);
@@ -52,7 +66,7 @@ export function buildXML(
         "Address this comment about";
       parts.push(`    <step n="${i + 1}" type="${a.type}">`);
       parts.push(`      <action>${verb}</action>`);
-      if (a.blockCrumb) parts.push(`      <where section="${esc(a.blockCrumb)}" line="${a.line || "?"}"/>`);
+      if (a.blockCrumb) parts.push(`      <where section="${esc(a.blockCrumb)}" ${locAttrs(a)}/>`);
       if (a.quoted) parts.push(`      <quote>${esc(a.quoted)}</quote>`);
       if (a.replacement) parts.push(`      <with>${esc(a.replacement)}</with>`);
       if (a.note) parts.push(`      <note>${esc(a.note)}</note>`);
@@ -70,7 +84,7 @@ export function buildXML(
   ];
   list.forEach((a, i) => {
     const scope = a.blockIds && a.blockIds.length > 1 ? ` scope="${a.blockIds.length}-blocks"` : "";
-    parts.push(`    <annotation id="${i + 1}" type="${a.type}" status="open" line="${a.line || "?"}"${scope}>`);
+    parts.push(`    <annotation id="${i + 1}" type="${a.type}" ${locAttrs(a)}${scope}>`);
     if (a.blockCrumb) parts.push(`      <location section="${esc(a.blockCrumb)}"/>`);
     if (a.quoted) parts.push(`      <quoted_text>${esc(a.quoted)}</quoted_text>`);
     if (a.note) parts.push(`      <reviewer_note>${esc(a.note)}</reviewer_note>`);
@@ -82,7 +96,7 @@ export function buildXML(
   });
   parts.push(`  </annotations>`);
   parts.push(`  <instructions>`);
-  parts.push(`    Apply each open annotation to the source document. For 'replace' and 'add'`);
+  parts.push(`    Apply each annotation to the source document. For 'replace' and 'add'`);
   parts.push(`    annotations use the proposed text verbatim. For 'delete' annotations remove`);
   parts.push(`    the quoted span (and its enclosing sentence if removal would leave a fragment).`);
   parts.push(`    For 'question' annotations, research the question against the document's`);
